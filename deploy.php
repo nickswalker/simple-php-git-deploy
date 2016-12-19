@@ -4,20 +4,27 @@
  *
  * Automatically deploy the code using PHP and Git.
  *
- * @version 1.3.1
- * @link    https://github.com/markomarkovic/simple-php-git-deploy/
+ * @version 1.4
+ * @link    https://github.com/nickswalker/simple-php-git-deploy/
  */
 
 // =========================================[ Configuration start ]===
 
+
 /**
- * It's preferable to configure the script using `deploy-config.php` file.
+ * Check the site parameter to see which site we're trying to deploy.
  *
- * Rename `deploy-config.example.php` to `deploy-config.php` and edit the
+ * Rename `deploy-config.example.php` to `<site-name>-config.php` and edit the
  * configuration options there instead of here. That way, you won't have to edit
  * the configuration again if you download the new version of `deploy.php`.
  */
-if (file_exists(basename(__FILE__, '.php').'-config.php')) {
+
+$site_param = isset($_GET['site']) ? $_GET['site'] : "";
+
+if (file_exists($site_param.'-config.php')) {
+	define('CONFIG_FILE', $site_param.'-config.php');
+	require_once CONFIG_FILE;
+} else if (file_exists(basename(__FILE__, '.php').'-config.php')) {
 	define('CONFIG_FILE', basename(__FILE__, '.php').'-config.php');
 	require_once CONFIG_FILE;
 } else {
@@ -152,6 +159,23 @@ if (!defined('COMPOSER_OPTIONS')) define('COMPOSER_OPTIONS', '--no-dev');
  */
 if (!defined('COMPOSER_HOME')) define('COMPOSER_HOME', false);
 
+
+/**
+ * OPTIONAL
+ * Whether to invoke Jekyll after the repository is cloned or changes are
+ * fetched. Jekyll needs to be available on the server machine, installed
+ * globaly (as `jekyll`).
+ *
+ * @var boolean Whether to use jekyll or not
+ * @link http://jekyllrb.com/
+ */
+if (!defined('USE_JEKYLL')) define('USE_JEKYLL', false);
+
+/**
+ * OPTIONAL
+ * The options that Jekyll is going to use.
+ */
+if (!defined('JEKYLL_OPTIONS')) define('JEKYLL_OPTIONS', '');
 /**
  * OPTIONAL
  * Email address to be notified on deployment failure.
@@ -185,6 +209,7 @@ h2, .error { color: #c33; }
 </head>
 <body>
 <?php
+// Do the security check.
 if (!isset($_GET['sat']) || $_GET['sat'] !== SECRET_ACCESS_TOKEN) {
 	header($_SERVER['SERVER_PROTOCOL'] . ' 403 Forbidden', true, 403);
 	die('<h2>ACCESS DENIED!</h2>');
@@ -202,6 +227,7 @@ Running as <b><?php echo trim(shell_exec('whoami')); ?></b>.
 
 <?php
 // Check if the required programs are available
+// Verify that backup directory is configured properly
 $requiredBinaries = array('git', 'rsync');
 if (defined('BACKUP_DIR') && BACKUP_DIR !== false) {
 	$requiredBinaries[] = 'tar';
@@ -212,6 +238,9 @@ if (defined('BACKUP_DIR') && BACKUP_DIR !== false) {
 }
 if (defined('USE_COMPOSER') && USE_COMPOSER === true) {
 	$requiredBinaries[] = 'composer --no-ansi';
+}
+if (defined('USE_JEKYLL') && USE_COMPOSER === true) {
+	$requiredBinaries[] = 'jekyll';
 }
 foreach ($requiredBinaries as $command) {
 	$path = trim(shell_exec('which '.$command));
@@ -304,6 +333,32 @@ if (defined('USE_COMPOSER') && USE_COMPOSER === true) {
 	if (defined('COMPOSER_HOME') && is_dir(COMPOSER_HOME)) {
 		putenv('COMPOSER_HOME='.COMPOSER_HOME);
 	}
+}
+
+// Invoke Jekyll
+if (defined('USE_JEKYLL') && USE_JEKYLL === true) {
+
+	$commands[] = sprintf(
+		'JEKYLL_ENV=production jekyll build %s'
+		, (defined('JEKYLL_OPTIONS')) ? JEKYLL_OPTIONS : ''
+	);
+	// Move results out
+	$commands[] = sprintf("mv %s_site %s..",
+	    TMP_DIR,
+	    TMP_DIR
+	);
+	// Clear the tmp dir
+	$commands[] = sprintf(
+    		'rm -rf %s* '
+    		, TMP_DIR
+    );
+    // Move build results into the tmp dir
+    $commands[] = sprintf(
+    		'mv  %s../_site/* %s'
+    		, TMP_DIR,
+    		TMP_DIR
+    	);
+
 }
 
 // ==================================================[ Deployment ]===

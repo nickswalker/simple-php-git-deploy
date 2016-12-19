@@ -79,7 +79,7 @@ define('EXCLUDE', serialize(array(
  *
  * @var string Full path including the trailing slash
  */
-define('TMP_DIR', '/tmp/spgd-'.md5(REMOTE_REPOSITORY).'/');
+define('TMP_DIR', '/tmp/spgd-'.md5(REMOTE_REPOSITORY.BRANCH).'/');
 
 /**
  * Whether to remove the TMP_DIR after the deployment.
