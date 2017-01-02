@@ -75,7 +75,10 @@ define('EXCLUDE', serialize(array(
  * Temporary directory we'll use to stage the code before the update. If it
  * already exists, script assumes that it contains an already cloned copy of the
  * repository with the correct remote origin and only fetches changes instead of
- * cloning the entire thing.
+ * cloning the entire thing. Note that only one deploy script can use a temp
+ * dir at a time. If we are deploying the same remote to multiple places at the same time,
+ * make sure that this directory is unique or you will encounter strange failures
+ * as two scripts attempt to operate on the same Git repo at once.
  *
  * @var string Full path including the trailing slash
  */
