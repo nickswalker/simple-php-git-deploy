@@ -338,6 +338,12 @@ if (defined('USE_COMPOSER') && USE_COMPOSER === true) {
 // Invoke Jekyll
 if (defined('USE_JEKYLL') && USE_JEKYLL === true) {
 
+    $commands[] = sprintf(
+    		'git clean -xfd'
+    	);
+    $commands[] = sprintf(
+                'JEKYLL_ENV=production bundle install'
+        );
 	$commands[] = sprintf(
 		'JEKYLL_ENV=production jekyll build %s'
 		, (defined('JEKYLL_OPTIONS')) ? JEKYLL_OPTIONS : ''
