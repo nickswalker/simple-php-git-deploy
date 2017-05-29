@@ -1,0 +1,22 @@
+{
+  "branch": "master",
+  "cleanUp": false,
+  "createVersionFile": true,
+  "deleteFiles": false,
+  "timeLimit": 30,
+  "backup": {
+    "enabled": false,
+    "destination": "/tmp"
+  },
+  "composer": {
+    "enabled": false,
+    "home": false
+  },
+  "email": {
+    "enabled": false,
+    "to": "example@example.com"
+  },
+  "jekyll": {
+    "enabled": false
+  }
+}
