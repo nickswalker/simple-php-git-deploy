@@ -1,76 +1,48 @@
 <?php
 
-$html_preamble = <<<END
- <!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="utf-8">
-	<meta name="robots" content="noindex">
-	<title>Simple PHP Git deploy script</title>
-	<style>
-body { padding: 0 1em; background: #222; color: #fff; }
-h2, .error { color: #c33; }
-        .prompt { color: #6be234; }
-            .command { color: #729fcf; }
-                .output { color: #999; }
-                    </style>
-</head>
-<body>
-END;
 
-
-function run($config)
-{
-    /**
-     * Check the site parameter to see which site we're trying to deploy.
-     *
-     * It's preferable to configure the script using `deploy-config.php` file.
-     *
-     * Rename `deploy-config.example.php` to `deploy-config.php` and edit the
-     * configuration options there instead of here. That way, you won't have to edit
-     * the configuration again if you download the new version of `deploy.php`.
-     */
+function run($config, $logger){
 
     ignore_user_abort(true);
 
     ob_start();
-    global $html_preamble;
-    echo $html_preamble;
     //echo "Using config found in ".$site_config_filename."\n";
-    checkEnvironment($config);
-
+    try {
+        checkEnvironment($config, $logger);
+    } catch (Exception $e) {
+        die($e->getMessage());
+    }
     $remote = $config["remoteRepository"];
     $branch = $config["branch"];
     $targetDir = $config["targetDir"];
 
-    echo <<<END
-
-Deploying $remote $branch
-to $targetDir ...
-
-END;
+    $logger->log("Deploying $remote $branch to $targetDir ...");
 
     $commands = makeCommands($config);
 
-    executeCommands($commands, $config);
+    try{
+        executeCommands($commands, $config, $logger);
+    } catch (Exception $e) {
+        die($e->getMessage());
+    }
 }
 
 
-function checkEnvironment($config) {
+function checkEnvironment($config, $logger) {
     $user = trim(shell_exec('whoami'));
-    echo "<pre>Checking the environment ...\n";
-    echo "Running as <b>" . $user . "</b>.\n";
+    $logger->log("Checking the environment ...\n");
+    $logger->log("Running as $user.\n");
 
 
     // Check if the required programs are available
     // Verify that backup directory is configured properly
-    $requiredBinaries = array('git', 'rsync');
+    $requiredBinaries = ['git', 'rsync'];
     if ($config["backup"]["enabled"] !== false) {
         $requiredBinaries[] = 'tar';
         $backup_dir = $config["backup"]["destination"];
         if (!is_dir($backup_dir) || !is_writable($backup_dir)) {
             errorIfServer();
-            die(sprintf('<div class="error">BACKUP_DIR `%s` does not exists or is not writeable.</div>', $backup_dir));
+            throw new Exception("BACKUP_DIR $backup_dir does not exists or is not writeable.");
         }
     }
     if ($config["composer"]["enabled"] === true) {
@@ -78,24 +50,27 @@ function checkEnvironment($config) {
     }
     if ($config["jekyll"]["enabled"] === true) {
         $requiredBinaries[] = 'jekyll';
+        $requiredBinaries[] = 'ruby';
+        $requiredBinaries[] = 'bundle';
     }
     foreach ($requiredBinaries as $command) {
         $path = trim(shell_exec('which ' . $command));
         if ($path == '') {
             errorIfServer();
-            die(sprintf('<div class="error"><b>%s</b> not available. It needs to be installed on the server for this script to work.</div>', $command));
+            throw new Exception("$command not available. It needs to be installed on the server for this script to work.");
         } else {
             $version = explode("\n", shell_exec($command . ' --version'));
-            printf('<b>%s</b> : %s' . "\n", $path, $version[0]);
+            $logger->log("$path : $version[0]");
         }
     }
-    echo "Environment OK.";
+    $logger->log("Environment OK.");
 }
+
 function makeCommands($config){
     $branch = $config["branch"];
     $remoteRepo = $config["remoteRepository"];
     $tmpDir = '/tmp/spgd-'.md5($remoteRepo.$branch).'/';
-    $commands = array();
+    $commands = [];
 
     if (!is_dir($tmpDir)) {
         // Clone the repository into the $tmpDir
@@ -166,10 +141,9 @@ function makeCommands($config){
 
     // Invoke Jekyll
     if ($config["jekyll"]["enabled"] === true) {
+        $commands[] = sprintf('export PATH=$PATH;JEKYLL_ENV=production bundle install --deployment');
 
-        $commands[] = sprintf('JEKYLL_ENV=production bundle install');
-
-        $commands[] = sprintf('JEKYLL_ENV=production jekyll build %s', $config["jekyll"]["options"]);
+        $commands[] = sprintf('export PATH=$PATH;JEKYLL_ENV=production bundle exec jekyll build %s', $config["jekyll"]["options"]);
         // Move results out
         $commands[] = sprintf("mv %s_site %s..", $tmpDir, $tmpDir);
         // Clear the tmp dir
@@ -196,13 +170,14 @@ function makeCommands($config){
     // Post Deploment
 
     // Remove the $tmpDir (depends on CLEAN_UP)
-    if ($config["cleanup"]) {
-        $commands['cleanup'] = sprintf('rm -rf %s', $tmpDir);
+    if ($config["cleanUp"]) {
+        $commands['cleanUp'] = sprintf('rm -rf %s', $tmpDir);
     }
     return $commands;
 }
-function executeCommands($commands, $config) {
-    $tmpDir = '/tmp/spgd-'.md5($config["remoteRepository"].$config["branch"]).'/';
+
+function executeCommands($commands, $config, $logger){
+    $tmpDir = '/tmp/spgd-' . md5($config["remoteRepository"] . $config["branch"]) . '/';
     $output = '';
     foreach ($commands as $command) {
         set_time_limit($config["timeLimit"]); // Reset the time limit for each command
@@ -210,62 +185,41 @@ function executeCommands($commands, $config) {
         if (file_exists($tmpDir) && is_dir($tmpDir)) {
             chdir($tmpDir); // Ensure that we're in the right directory
         }
-        $tmp = array();
-        exec($command.' 2>&1', $tmp, $return_code); // Execute the command
+        $tmp = [];
+        exec($command . ' 2>&1', $tmp, $return_code); // Execute the command
         // Output the result
-        printf('
-            <span class="prompt">$</span> <span class="command">%s</span>
-            <div class="output">%s</div>
-            '
-            , htmlentities(trim($command))
-            , htmlentities(trim(implode("\n", $tmp)))
-        );
+        $logger->log( trim($command));
+        $logger->log(trim(implode("\n", $tmp)));
+
         $output .= ob_get_contents();
         ob_flush(); // Try to output everything as it happens
 
         // Error handling and cleanup
         if ($return_code !== 0) {
             errorIfServer();
-            printf('
-            <div class="error">
-            Error encountered!
-            Stopping the script to prevent possible data loss.
-            CHECK THE DATA IN YOUR TARGET DIR!
-            </div>
-            '
-            );
-            if ($config["cleanup"]) {
-                $tmp = shell_exec($commands['cleanup']);
-                printf('Cleaning up temporary files ...
 
-<span class="prompt">$</span> <span class="command">%s</span>
-<div class="output">%s</div>
-'
-                    , htmlentities(trim($commands['cleanup']))
-                    , htmlentities(trim($tmp))
-                );
+            if ($config["cleanUp"]) {
+                $tmp = shell_exec($commands['cleanUp']);
+                $logger->log("Cleaning up temporary files ...");
+                $logger->log(sprintf("%s %s", trim($commands['cleanUp']), trim($tmp)));
             }
             $error = sprintf('Deployment error on %s using %s!', $config["hostname"], __FILE__);
             error_log($error);
-            if ($config["emailOnError"]) {
+            if ($config["email"]["enabled"]) {
                 $output .= ob_get_contents();
-                $headers = array();
+                $headers = [];
                 $headers[] = sprintf('From: Simple PHP Git deploy script <simple-php-git-deploy@%s>', $config["hostname"]);
                 $headers[] = sprintf('X-Mailer: PHP/%s', phpversion());
-                mail($config["emailOnError"], $error, strip_tags(trim($output)), implode("\r\n", $headers));
+                mail($config["email"]["to"], $error, strip_tags(trim($output)), implode("\r\n", $headers));
             }
             break;
         }
     }
-    echo <<<END
-        Done.
-</pre>
-</body>
-</html>
-END;
+
+    $logger->log("Done");
 }
 
-function errorIfServer($message) {
+function errorIfServer() {
     if (defined("SERVER")) {
         header($_SERVER['SERVER_PROTOCOL'] . ' 500 Internal Server Error', true, 500);
     }
@@ -275,18 +229,18 @@ function loadConfiguration($siteName) {
     // Read in defaults
     $configFilename = 'config/default.json';
     if (!file_exists($configFilename)) {
-        die("Can't find " . $configFilename);
+       return false;
     }
     $contents = file_get_contents($configFilename);
     $config = json_decode($contents, true);
-// Overlay shared configuration, if it exists
+    // Overlay shared configuration, if it exists
     $sharedConfigFilename = 'config/shared.json';
     if (file_exists($sharedConfigFilename)) {
         $sharedConfig = json_decode(file_get_contents($sharedConfigFilename), true);
         $config = array_replace_recursive($config, $sharedConfig);
     }
 
-// Get the site specific configuration
+    // Get the site specific configuration
     $site_config_filename = 'config/' . $siteName . '.json';
     if (file_exists($site_config_filename)) {
         $site_config = json_decode(file_get_contents($site_config_filename), true);

@@ -1,6 +1,6 @@
 {
   "branch": "master",
-  "cleanUp": false,
+  "cleanUp": true,
   "createVersionFile": true,
   "deleteFiles": false,
   "timeLimit": 30,
@@ -10,13 +10,15 @@
   },
   "composer": {
     "enabled": false,
-    "home": false
+    "home": false,
+    "options": ""
   },
   "email": {
     "enabled": false,
     "to": "example@example.com"
   },
   "jekyll": {
-    "enabled": false
+    "enabled": false,
+    "options": ""
   }
 }
