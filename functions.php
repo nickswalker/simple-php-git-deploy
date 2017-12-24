@@ -2,10 +2,8 @@
 
 
 function run($config, $logger){
-
     ignore_user_abort(true);
 
-    ob_start();
     //echo "Using config found in ".$site_config_filename."\n";
     try {
         checkEnvironment($config, $logger);
@@ -15,16 +13,41 @@ function run($config, $logger){
     $remote = $config["remoteRepository"];
     $branch = $config["branch"];
     $targetDir = $config["targetDir"];
+    $workingDir = "/tmp/spgd-".$config["siteName"]."-".$branch.md5($remote.$branch).'/';
 
-    $logger->log("Deploying $remote $branch to $targetDir ...");
 
-    $commands = makeCommands($config);
-
+    $logger->log("Obtaining working directory lock...");
     try{
-        executeCommands($commands, $config, $logger);
+        $lock = obtainWorkingDirectory($workingDir);
     } catch (Exception $e) {
         die($e->getMessage());
     }
+    $commands = makeCommands($config, $workingDir);
+
+    $logger->log("Deploying $remote $branch to $targetDir ...");
+    try{
+        executeCommands($commands, $workingDir, $config, $logger);
+    } catch (Exception $e) {
+        $logger->log($e->getMessage());
+        errorIfServer();
+
+        if ($config["cleanUp"]) {
+            $tmp = shell_exec($commands['cleanUp']);
+            $logger->log("Cleaning up temporary files ...");
+            $logger->log(sprintf("%s %s", trim($commands['cleanUp']), trim($tmp)));
+        }
+        $error = sprintf('Deployment error on %s using %s!', $config["hostname"], __FILE__);
+        error_log($error);
+        if ($config["email"]["enabled"]) {
+            $headers = [];
+            $headers[] = sprintf('From: Simple PHP Git deploy script <simple-php-git-deploy@%s>', $config["hostname"]);
+            $headers[] = sprintf('X-Mailer: PHP/%s', phpversion());
+            mail($config["email"]["to"], $error, strip_tags(trim($logger->getLog())), implode("\r\n", $headers));
+        }
+        releaseWorkingDirectory($lock);
+        die($e->getMessage());
+    }
+    releaseWorkingDirectory($lock);
 }
 
 
@@ -49,7 +72,6 @@ function checkEnvironment($config, $logger) {
         $requiredBinaries[] = 'composer --no-ansi';
     }
     if ($config["jekyll"]["enabled"] === true) {
-        $requiredBinaries[] = 'jekyll';
         $requiredBinaries[] = 'ruby';
         $requiredBinaries[] = 'bundle';
     }
@@ -66,12 +88,37 @@ function checkEnvironment($config, $logger) {
     $logger->log("Environment OK.");
 }
 
-function makeCommands($config){
+function obtainWorkingDirectory($workingDirectory) {
+    $workingBase = basename($workingDirectory);
+    $lockPath = "/tmp/$workingBase.lock";
+    touch($lockPath);
+    $lock = fopen($lockPath, "r+");
+    $startStamp = microtime(true);
+    $timeout = 60 * 5;
+    // Poll the lock to see if we can obtain it, or wait until it no longer exists
+    while (true) {
+        $obtained = flock($lock, LOCK_EX | LOCK_NB);
+        if ($obtained) {
+            break;
+        }
+        $elapsed = microtime(true) - $startStamp;
+        if ($elapsed > $timeout) {
+            throw new Exception("Timed out while trying to get directory lock");
+        }
+    }
+    return $lock;
+
+}
+
+function releaseWorkingDirectory($lockFile) {
+    flock($lockFile, LOCK_UN);
+    fclose($lockFile);
+}
+
+function makeCommands($config, $tmpDir){
+    $commands = [];
     $branch = $config["branch"];
     $remoteRepo = $config["remoteRepository"];
-    $tmpDir = '/tmp/spgd-'.md5($remoteRepo.$branch).'/';
-    $commands = [];
-
     if (!is_dir($tmpDir)) {
         // Clone the repository into the $tmpDir
         $commands[] = sprintf(
@@ -176,43 +223,22 @@ function makeCommands($config){
     return $commands;
 }
 
-function executeCommands($commands, $config, $logger){
-    $tmpDir = '/tmp/spgd-' . md5($config["remoteRepository"] . $config["branch"]) . '/';
-    $output = '';
+function executeCommands($commands, $workingDir, $config, $logger){
     foreach ($commands as $command) {
         set_time_limit($config["timeLimit"]); // Reset the time limit for each command
 
-        if (file_exists($tmpDir) && is_dir($tmpDir)) {
-            chdir($tmpDir); // Ensure that we're in the right directory
+        if (file_exists($workingDir) && is_dir($workingDir)) {
+            chdir($workingDir); // Ensure that we're in the right directory
         }
         $tmp = [];
+        $logger->log( trim($command));
         exec($command . ' 2>&1', $tmp, $return_code); // Execute the command
         // Output the result
-        $logger->log( trim($command));
         $logger->log(trim(implode("\n", $tmp)));
-
-        $output .= ob_get_contents();
-        ob_flush(); // Try to output everything as it happens
 
         // Error handling and cleanup
         if ($return_code !== 0) {
-            errorIfServer();
-
-            if ($config["cleanUp"]) {
-                $tmp = shell_exec($commands['cleanUp']);
-                $logger->log("Cleaning up temporary files ...");
-                $logger->log(sprintf("%s %s", trim($commands['cleanUp']), trim($tmp)));
-            }
-            $error = sprintf('Deployment error on %s using %s!', $config["hostname"], __FILE__);
-            error_log($error);
-            if ($config["email"]["enabled"]) {
-                $output .= ob_get_contents();
-                $headers = [];
-                $headers[] = sprintf('From: Simple PHP Git deploy script <simple-php-git-deploy@%s>', $config["hostname"]);
-                $headers[] = sprintf('X-Mailer: PHP/%s', phpversion());
-                mail($config["email"]["to"], $error, strip_tags(trim($output)), implode("\r\n", $headers));
-            }
-            break;
+            throw new Exception("$command failed with exit code $return_code");
         }
     }
 

@@ -18,5 +18,6 @@ if (!$config) {
 
 $logger = new PlainTextLogger();
 $logger->log("Started ".date("D M d, Y G:i"));
+$config["siteName"] = $siteName;
 run($config, $logger);
 $logger->log("Finished ".date("D M d, Y G:i"));

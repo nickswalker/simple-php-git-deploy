@@ -27,13 +27,15 @@ interface Logger{
 class HTMLLogger implements Logger{
     private $completeLog;
     function __construct() {
+        ob_start();
         global $html_preamble;
         $this->completeLog = $html_preamble;
         echo $html_preamble;
     }
     public function log($message) {
         $this->completeLog .= htmlentities($message)."\n";
-        echo "<pre>".htmlentities($message)."</pre>";
+        echo "<pre>".htmlentities($message)."</pre>\n";
+        ob_flush();
     }
 
     public function getLog(){
@@ -45,12 +47,14 @@ class PlainTextLogger implements Logger{
     private $completeLog;
 
     function __construct() {
+        ob_start();
         $this->completeLog = "";
 
     }
     public function log($message) {
         $this->completeLog .= $message."\n";
         echo $message."\n";
+        ob_flush();
     }
 
     public function getLog()

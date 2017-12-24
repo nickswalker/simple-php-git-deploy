@@ -1,9 +1,13 @@
 # Simple PHP Git deploy script
 
-Automatically deploy code using PHP and Git. This is a fork of Marko Marković's [original project](https://github.com/markomarkovic/simple-php-git-deploy), which adds support for deploying Jekyll sites and improves support for using the script to deploy multiple sites.
+Automatically deploy code using PHP and Git.
 
-* Deploy a Jekyll or Composer project
-* Keeps deployment logs
+* Deploys Jekyll and/or Composer projects
+* Multi-site support
+* Background execution mode for long-running deploys
+* Multi-process safe: ready to serve as an on-push webhook, even for projects with frequent pushes
+
+This is a significantly enhanced fork of Marko Marković's [original project](https://github.com/markomarkovic/simple-php-git-deploy).
 
 ## Requirements
 
@@ -23,8 +27,7 @@ Automatically deploy code using PHP and Git. This is a fork of Marko Marković's
 ## Usage
 
 ### Initial Setup
- * Put the script somewhere that's accessible from the
-   Internet.
+ * Put the script somewhere that's accessible from the Internet.
 
 ### Configure a New Deployment
  * Copy `config/default.json` to `<site-name>.json` and edit the
@@ -32,6 +35,8 @@ Automatically deploy code using PHP and Git. This is a fork of Marko Marković's
  * Ensure that you have a unique secret key set in the configuration file.
  * Configure your git repository to call `deploy.php` when the code is updated.
    The instructions for GitHub and Bitbucket are below.
+   
+   Note that you can have as many configuration files/sites as you like.
 
 ### GitHub
 
