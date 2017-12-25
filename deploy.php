@@ -7,6 +7,8 @@
  * @version 1.4
  * @link    https://github.com/nickswalker/simple-php-git-deploy/
  */
+//error_reporting(E_ALL);
+//ini_set('display_errors', '1');
 
 include_once "functions.php";
 include_once "loggers.php";

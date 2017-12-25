@@ -21,5 +21,12 @@
   "jekyll": {
     "enabled": false,
     "options": ""
+  },
+  "cloudflare": {
+    "enabled": false,
+    "apiKey": "SECRETKEY",
+    "email": "account@email.com",
+    "domain": "domain-to-clear.com",
+    "zoneId": "domain-specific-id"
   }
 }

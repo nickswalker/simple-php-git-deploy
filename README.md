@@ -6,6 +6,7 @@ Automatically deploy code using PHP and Git.
 * Multi-site support
 * Background execution mode for long-running deploys
 * Multi-process safe: ready to serve as an on-push webhook, even for projects with frequent pushes
+* CloudFlare cache-purging
 
 This is a significantly enhanced fork of Marko Marković's [original project](https://github.com/markomarkovic/simple-php-git-deploy).
 
@@ -27,11 +28,12 @@ This is a significantly enhanced fork of Marko Marković's [original project](ht
 ## Usage
 
 ### Initial Setup
- * Put the script somewhere that's accessible from the Internet.
+ * Put the scripts somewhere that's accessible from the Internet.
 
 ### Configure a New Deployment
  * Copy `config/default.json` to `<site-name>.json` and edit the
-   configuration options there.
+   configuration options there. If you'd like to have shared configuration across 
+   multiple sites, add them to `config/shared.json` (leave default as-is to make future updates easier).
  * Ensure that you have a unique secret key set in the configuration file.
  * Configure your git repository to call `deploy.php` when the code is updated.
    The instructions for GitHub and Bitbucket are below.

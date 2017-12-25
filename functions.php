@@ -1,9 +1,7 @@
 <?php
 
-
 function run($config, $logger){
     ignore_user_abort(true);
-
     //echo "Using config found in ".$site_config_filename."\n";
     try {
         checkEnvironment($config, $logger);
@@ -40,7 +38,7 @@ function run($config, $logger){
         error_log($error);
         if ($config["email"]["enabled"]) {
             $headers = [];
-            $headers[] = sprintf('From: Simple PHP Git deploy script <simple-php-git-deploy@%s>', $config["hostname"]);
+            $headers[] = "From: Simple PHP Git deploy script <simple-php-git-deploy@${config['hostname']}>";
             $headers[] = sprintf('X-Mailer: PHP/%s', phpversion());
             mail($config["email"]["to"], $error, strip_tags(trim($logger->getLog())), implode("\r\n", $headers));
         }
@@ -74,6 +72,9 @@ function checkEnvironment($config, $logger) {
     if ($config["jekyll"]["enabled"] === true) {
         $requiredBinaries[] = 'ruby';
         $requiredBinaries[] = 'bundle';
+    }
+    if ($config['cloudflare']['enabled'] === true) {
+        $requiredBinaries[] = 'curl';
     }
     foreach ($requiredBinaries as $command) {
         $path = trim(shell_exec('which ' . $command));
@@ -121,41 +122,24 @@ function makeCommands($config, $tmpDir){
     $remoteRepo = $config["remoteRepository"];
     if (!is_dir($tmpDir)) {
         // Clone the repository into the $tmpDir
-        $commands[] = sprintf(
-            'git clone --depth=1 --branch %s %s %s'
-            , $branch
-            , $remoteRepo
-            , $tmpDir
-        );
+        $commands[] = "git clone --depth=1 --branch $branch $remoteRepo $tmpDir";
     } else {
         // $tmpDir exists and hopefully already contains the correct remote origin
         // so we'll fetch the changes and reset the contents.
-        $commands[] = sprintf(
-            'git --git-dir="%s.git" --work-tree="%s" fetch --tags origin %s'
-            , $tmpDir
-            , $tmpDir
-            , $branch
-        );
-        $commands[] = sprintf(
-            'git --git-dir="%s.git" --work-tree="%s" reset --hard FETCH_HEAD'
-            , $tmpDir
-            , $tmpDir
-        );
+        $commands[] = "git --git-dir='$tmpDir.git' --work-tree='$tmpDir'' fetch --tags origin $branch";
+        $commands[] = "git --git-dir='$tmpDir.git' --work-tree='%$tmpDir'' reset --hard FETCH_HEAD";
+
     }
 
     // Update the submodules
-    $commands[] = sprintf(
-        'git submodule update --init --recursive'
-    );
+    $commands[] = 'git submodule update --init --recursive';
+
 
     // Describe the deployed version
     if ($config["createVersionFile"]) {
-        $commands[] = sprintf(
-            'git --git-dir="%s.git" --work-tree="%s" describe --always > %s'
-            , $tmpDir
-            , $tmpDir
-            , "sgd-version.txt"
-        );
+        $commands[] = "git --git-dir='$tmpDir.git' --work-tree='$tmpDir' describe --always > 'sgd-version.txt'";
+        $dateStamp = date("D M d, Y G:i");
+        $commands[] = "echo '\n$dateStamp' >> 'sgd-version.txt'";
     }
 
     // Backup the TARGET_DIR
@@ -176,11 +160,9 @@ function makeCommands($config, $tmpDir){
 
     // Invoke composer
     if ($config["composer"]["enabled"] === true) {
-        $commands[] = sprintf(
-            'composer --no-ansi --no-interaction --no-progress --working-dir=%s install %s'
-            , $tmpDir
-            , $config["composer"]["options"]
-        );
+        $composerOptions = $config['composer']['options'];
+        $commands[] = "composer --no-ansi --no-interaction --no-progress --working-dir=$tmpDir install $composerOptions";
+
         if ($config["composer"]["home"]) {
             putenv('COMPOSER_HOME='.$config["composer"]["home"]);
         }
@@ -188,15 +170,15 @@ function makeCommands($config, $tmpDir){
 
     // Invoke Jekyll
     if ($config["jekyll"]["enabled"] === true) {
-        $commands[] = sprintf('export PATH=$PATH;JEKYLL_ENV=production bundle install --deployment');
-
-        $commands[] = sprintf('export PATH=$PATH;JEKYLL_ENV=production bundle exec jekyll build %s', $config["jekyll"]["options"]);
+        $jekyllOptions = $config['jekyll']['options'];
+        $commands[] = 'export PATH=$PATH;JEKYLL_ENV=production bundle install --deployment';
+        $commands[] = "export PATH=\$PATH;JEKYLL_ENV=production bundle exec jekyll build $jekyllOptions";
         // Move results out
-        $commands[] = sprintf("mv %s_site %s..", $tmpDir, $tmpDir);
+        $commands[] = "mv ${tmpDir}_site $tmpDir..";
         // Clear the tmp dir
-        $commands[] = sprintf('rm -rf %s* ', $tmpDir);
+        $commands[] = "rm -rf ${tmpDir}* ";
         // Move build results into the tmp dir
-        $commands[] = sprintf('mv  %s../_site/* %s', $tmpDir, $tmpDir);
+        $commands[] = "mv  $tmpDir../_site/* $tmpDir";
 
     }
 
@@ -214,11 +196,24 @@ function makeCommands($config, $tmpDir){
         , $exclude
     );
 
-    // Post Deploment
+    // Post Deployment
+
+    //https://api.cloudflare.com/#zone-purge-all-files
+    if ($config['cloudflare']['enabled']) {
+        $cfEmail = $config['cloudflare']['email'];
+        $zone = $config['cloudflare']['zoneId'];
+        $apiKey = $config['cloudflare']['apiKey'];
+        $commands[] = "curl -X DELETE 'https://api.cloudflare.com/client/v4/zones/$zone/purge_cache' \
+        -H 'Content-Type:application/json' \
+        -H 'X-Auth-Key:$apiKey' \
+        -H 'X-Auth-Email:$cfEmail' \
+        -H 'Content-Type: application/json' \
+        --data '{\"purge_everything\":true}'";
+    }
 
     // Remove the $tmpDir (depends on CLEAN_UP)
     if ($config["cleanUp"]) {
-        $commands['cleanUp'] = sprintf('rm -rf %s', $tmpDir);
+        $commands['cleanUp'] = "rm -rf $tmpDir";
     }
     return $commands;
 }
@@ -259,10 +254,16 @@ function loadConfiguration($siteName) {
     }
     $contents = file_get_contents($configFilename);
     $config = json_decode($contents, true);
+    if (!$config) {
+        throw new Exception("Couldn't parse $config");
+    }
     // Overlay shared configuration, if it exists
     $sharedConfigFilename = 'config/shared.json';
     if (file_exists($sharedConfigFilename)) {
         $sharedConfig = json_decode(file_get_contents($sharedConfigFilename), true);
+        if (!$sharedConfig) {
+            throw new Exception("Couldn't parse $sharedConfigFilename");
+        }
         $config = array_replace_recursive($config, $sharedConfig);
     }
 
@@ -270,6 +271,9 @@ function loadConfiguration($siteName) {
     $site_config_filename = 'config/' . $siteName . '.json';
     if (file_exists($site_config_filename)) {
         $site_config = json_decode(file_get_contents($site_config_filename), true);
+        if (!$site_config) {
+            throw new Exception("Couldn't parse $site_config_filename");
+        }
         $config = array_replace_recursive($config, $site_config);
     }
     return $config;
