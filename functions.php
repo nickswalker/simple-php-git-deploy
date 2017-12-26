@@ -1,5 +1,7 @@
 <?php
 
+$DEPLOY_TIMEOUT = 60 * 10;
+
 function run($config, $logger){
     ignore_user_abort(true);
     //echo "Using config found in ".$site_config_filename."\n";
@@ -16,7 +18,8 @@ function run($config, $logger){
 
     $logger->log("Obtaining working directory lock...");
     try{
-        $lock = obtainWorkingDirectory($workingDir);
+        $workingBase = basename($workingDir);
+        $workingDirLock = obtainLock($workingBase);
     } catch (Exception $e) {
         die($e->getMessage());
     }
@@ -24,8 +27,15 @@ function run($config, $logger){
 
     $logger->log("Deploying $remote $branch to $targetDir ...");
     try{
+        if ($config["oneAtATime"]) {
+            $logger->log("Obtaining deploy lock...");
+            $deployLock = obtainLock("deploy");
+        }
         executeCommands($commands, $workingDir, $config, $logger);
     } catch (Exception $e) {
+        if ($config["oneAtATime"] && $deployLock) {
+            releaseLock($deployLock);
+        }
         $logger->log($e->getMessage());
         errorIfServer();
 
@@ -35,17 +45,18 @@ function run($config, $logger){
             $logger->log(sprintf("%s %s", trim($commands['cleanUp']), trim($tmp)));
         }
         $error = sprintf('Deployment error on %s using %s!', $config["hostname"], __FILE__);
-        error_log($error);
+
+        $logger->log($error);
         if ($config["email"]["enabled"]) {
             $headers = [];
             $headers[] = "From: Simple PHP Git deploy script <simple-php-git-deploy@${config['hostname']}>";
             $headers[] = sprintf('X-Mailer: PHP/%s', phpversion());
             mail($config["email"]["to"], $error, strip_tags(trim($logger->getLog())), implode("\r\n", $headers));
         }
-        releaseWorkingDirectory($lock);
-        die($e->getMessage());
+        releaseLock($workingDirLock);
+        die();
     }
-    releaseWorkingDirectory($lock);
+    releaseLock($workingDirLock);
 }
 
 
@@ -89,13 +100,12 @@ function checkEnvironment($config, $logger) {
     $logger->log("Environment OK.");
 }
 
-function obtainWorkingDirectory($workingDirectory) {
-    $workingBase = basename($workingDirectory);
-    $lockPath = "/tmp/$workingBase.lock";
+function obtainLock($name) {
+    global $DEPLOY_TIMEOUT;
+    $lockPath = "/tmp/$name.lock";
     touch($lockPath);
     $lock = fopen($lockPath, "r+");
-    $startStamp = microtime(true);
-    $timeout = 60 * 5;
+    $startStamp = microtime(true);;
     // Poll the lock to see if we can obtain it, or wait until it no longer exists
     while (true) {
         $obtained = flock($lock, LOCK_EX | LOCK_NB);
@@ -103,7 +113,7 @@ function obtainWorkingDirectory($workingDirectory) {
             break;
         }
         $elapsed = microtime(true) - $startStamp;
-        if ($elapsed > $timeout) {
+        if ($elapsed > $DEPLOY_TIMEOUT) {
             throw new Exception("Timed out while trying to get directory lock");
         }
     }
@@ -111,7 +121,7 @@ function obtainWorkingDirectory($workingDirectory) {
 
 }
 
-function releaseWorkingDirectory($lockFile) {
+function releaseLock($lockFile) {
     flock($lockFile, LOCK_UN);
     fclose($lockFile);
 }
@@ -120,14 +130,15 @@ function makeCommands($config, $tmpDir){
     $commands = [];
     $branch = $config["branch"];
     $remoteRepo = $config["remoteRepository"];
+    $toDeploy = $tmpDir;
     if (!is_dir($tmpDir)) {
         // Clone the repository into the $tmpDir
         $commands[] = "git clone --depth=1 --branch $branch $remoteRepo $tmpDir";
     } else {
         // $tmpDir exists and hopefully already contains the correct remote origin
         // so we'll fetch the changes and reset the contents.
-        $commands[] = "git --git-dir='$tmpDir.git' --work-tree='$tmpDir'' fetch --tags origin $branch";
-        $commands[] = "git --git-dir='$tmpDir.git' --work-tree='%$tmpDir'' reset --hard FETCH_HEAD";
+        $commands[] = "git --git-dir='$tmpDir.git' --work-tree='$tmpDir' fetch --tags origin $branch";
+        $commands[] = "git --git-dir='$tmpDir.git' --work-tree='$tmpDir' reset --hard FETCH_HEAD";
 
     }
 
@@ -173,12 +184,7 @@ function makeCommands($config, $tmpDir){
         $jekyllOptions = $config['jekyll']['options'];
         $commands[] = 'export PATH=$PATH;JEKYLL_ENV=production bundle install --deployment';
         $commands[] = "export PATH=\$PATH;JEKYLL_ENV=production bundle exec jekyll build $jekyllOptions";
-        // Move results out
-        $commands[] = "mv ${tmpDir}_site $tmpDir..";
-        // Clear the tmp dir
-        $commands[] = "rm -rf ${tmpDir}* ";
-        // Move build results into the tmp dir
-        $commands[] = "mv  $tmpDir../_site/* $tmpDir";
+        $toDeploy = "{$tmpDir}_site/";
 
     }
 
@@ -187,10 +193,14 @@ function makeCommands($config, $tmpDir){
     foreach ($config['exclude'] as $exc) {
         $exclude .= ' --exclude='.$exc;
     }
+
+
+
+
     // Deployment command
     $commands[] = sprintf(
         'rsync -rltgoDzvO %s %s %s %s'
-        , $tmpDir
+        , $toDeploy
         , $config["targetDir"]
         , ($config["deleteFiles"]) ? '--delete-after' : ''
         , $exclude
@@ -230,10 +240,10 @@ function executeCommands($commands, $workingDir, $config, $logger){
         exec($command . ' 2>&1', $tmp, $return_code); // Execute the command
         // Output the result
         $logger->log(trim(implode("\n", $tmp)));
-
+        $logger->log("Returned $return_code");
         // Error handling and cleanup
         if ($return_code !== 0) {
-            throw new Exception("$command failed with exit code $return_code");
+            throw new Exception("Command failed");
         }
     }
 

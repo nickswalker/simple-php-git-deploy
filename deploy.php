@@ -30,9 +30,10 @@ if (!isset($config['secretToken']) || $config['secretToken'] !== $token) {
 }
 
 if($config["runInBackground"] === true) {
+    $branch = $config['branch'];
     $descriptorspec = [
         ['pipe', 'r'],               // stdin
-        ['file', 'lastbackgrounddeploy.txt', 'a'], // stdout
+        ['file', "$siteName-$branch.txt", 'a'], // stdout
         ['pipe', 'w'],               // stderr
     ];
 

@@ -5,6 +5,7 @@
   "deleteFiles": false,
   "timeLimit": 30,
   "exclude": [".git", ".sass-cache"],
+  "oneAtATime": false,
   "backup": {
     "enabled": false,
     "destination": "/tmp"
