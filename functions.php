@@ -217,7 +217,6 @@ function makeCommands($config, $tmpDir){
         -H 'Content-Type:application/json' \
         -H 'X-Auth-Key:$apiKey' \
         -H 'X-Auth-Email:$cfEmail' \
-        -H 'Content-Type: application/json' \
         --data '{\"purge_everything\":true}'";
     }
 
