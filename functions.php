@@ -15,6 +15,9 @@ function run($config, $logger){
     $targetDir = $config["targetDir"];
     $workingDir = "/tmp/spgd-".$config["siteName"]."-".$branch.md5($remote.$branch).'/';
 
+    // Jekyll needs these to be set
+    putenv("LC_CTYPE=en_US.UTF-8");
+    putenv("LANG=en_US.UTF-8");
 
     $logger->log("Obtaining working directory lock...");
     try{
